@@ -13,63 +13,136 @@ import org.apache.hc.client5.http.impl.classic.CloseableHttpResponse;
 import org.apache.hc.client5.http.impl.classic.HttpClients;
 import org.apache.hc.core5.http.HttpStatus;
 import org.apache.hc.core5.util.Timeout;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.util.Base64;
 
 public class CustomAuthProvider implements Authenticator {
 
+    private static final Logger logger = LoggerFactory.getLogger(CustomAuthProvider.class);
+
     @Override
     public void authenticate(AuthenticationFlowContext context) {
+        logger.debug("::authenticate");
+
+        if (context.getAuthenticatorConfig() == null) {
+            logger.error("[CUSTOM-AUTH] Ausência de configuração detectada!");
+            context.failure(AuthenticationFlowError.INVALID_USER);
+            return;
+        } else if (!isValidConfig(context)) {
+            context.failure(AuthenticationFlowError.INVALID_USER);
+            return;
+        }
+
         UserModel user = context.getUser();
         String username = user.getUsername();
 
-        boolean isAuthenticated = callExternalAPI(username);
+        logger.info("Iniciando autenticação para o usuário: {}", username);
+
+        String apiUrl = context.getAuthenticatorConfig().getConfig().get(CustomAuthProviderFactory.PROPERTY_URL);
+        String apiUsername = context.getAuthenticatorConfig().getConfig().get(CustomAuthProviderFactory.PROPERTY_USERNAME);
+        String apiPassword = context.getAuthenticatorConfig().getConfig().get(CustomAuthProviderFactory.PROPERTY_PASSWORD);
+        int connectTimeout = Integer.parseInt(context.getAuthenticatorConfig().getConfig().getOrDefault(CustomAuthProviderFactory.PROPERTY_TIMEOUT_CONNECT, "5"));
+        int responseTimeout = Integer.parseInt(context.getAuthenticatorConfig().getConfig().getOrDefault(CustomAuthProviderFactory.PROPERTY_TIMEOUT_RESPONSE, "5"));
+
+        boolean isAuthenticated = callExternalAPI(username, apiUrl, apiUsername, apiPassword, connectTimeout, responseTimeout);
 
         if (isAuthenticated) {
+            logger.info("Autenticação bem-sucedida para o usuário: {}", username);
             context.success();
         } else {
+            logger.warn("Falha na autenticação para o usuário: {}", username);
             context.failure(AuthenticationFlowError.INVALID_USER);
         }
     }
 
-    private boolean callExternalAPI(String username) {
-        // URL de acordo com o OpenAPI atualizado
-        String url = "https://api.pge-rj.gov.br/v1/authenticateUser?username=" + username;
+    private boolean isValidConfig(AuthenticationFlowContext context) {
+        logger.debug("::isValidConfig");
+
+        boolean valid = true;
+
+        String apiUrl = context.getAuthenticatorConfig().getConfig().get(CustomAuthProviderFactory.PROPERTY_URL);
+        String apiUsername = context.getAuthenticatorConfig().getConfig().get(CustomAuthProviderFactory.PROPERTY_USERNAME);
+        String apiPassword = context.getAuthenticatorConfig().getConfig().get(CustomAuthProviderFactory.PROPERTY_PASSWORD);
+        String connectTimeoutStr = context.getAuthenticatorConfig().getConfig().get(CustomAuthProviderFactory.PROPERTY_TIMEOUT_CONNECT);
+        String responseTimeoutStr = context.getAuthenticatorConfig().getConfig().get(CustomAuthProviderFactory.PROPERTY_TIMEOUT_RESPONSE);
+
+        if (isNullOrEmpty(apiUrl)) {
+            logger.error("[CUSTOM-AUTH] Configuração inválida! " + CustomAuthProviderFactory.PROPERTY_URL + " não foi preenchido.");
+            valid = false;
+        }
+
+        if (isNullOrEmpty(apiUsername)) {
+            logger.error("[CUSTOM-AUTH] Configuração inválida! " + CustomAuthProviderFactory.PROPERTY_USERNAME + " não foi preenchido.");
+            valid = false;
+        }
+
+        if (isNullOrEmpty(apiPassword)) {
+            logger.error("[CUSTOM-AUTH] Configuração inválida! " + CustomAuthProviderFactory.PROPERTY_PASSWORD + " não foi preenchido.");
+            valid = false;
+        }
+
+        if (isNullOrEmpty(connectTimeoutStr) || !isNumeric(connectTimeoutStr)) {
+            logger.error("[CUSTOM-AUTH] Configuração inválida! " + CustomAuthProviderFactory.PROPERTY_TIMEOUT_CONNECT + " não foi preenchido ou não é um número.");
+            valid = false;
+        }
+
+        if (isNullOrEmpty(responseTimeoutStr) || !isNumeric(responseTimeoutStr)) {
+            logger.error("[CUSTOM-AUTH] Configuração inválida! " + CustomAuthProviderFactory.PROPERTY_TIMEOUT_RESPONSE + " não foi preenchido ou não é um número.");
+            valid = false;
+        }
+
+        return valid;
+    }
+
+    private boolean isNullOrEmpty(String value) {
+        return value == null || value.trim().isEmpty();
+    }
+
+    private boolean isNumeric(String str) {
+        return str.matches("\\d+");
+    }
+
+    private boolean callExternalAPI(String username, String apiUrl, String apiUsername, String apiPassword, int connectTimeout, int responseTimeout) {
+        String url = apiUrl + "?username=" + username;
 
         // Configuração de timeout
         RequestConfig config = RequestConfig.custom()
-                .setConnectTimeout(Timeout.ofSeconds(5))  // Timeout de conexão
-                .setResponseTimeout(Timeout.ofSeconds(5)) // Timeout de resposta
+                .setConnectTimeout(Timeout.ofSeconds(connectTimeout))  // Timeout de conexão
+                .setResponseTimeout(Timeout.ofSeconds(responseTimeout)) // Timeout de resposta
                 .build();
 
         // Credenciais para autenticação Basic
-        String apiUsername = "username";  // Substitua com o username correto
-        String apiPassword = "password";  // Substitua com a senha correta
         String auth = apiUsername + ":" + apiPassword;
         String encodedAuth = Base64.getEncoder().encodeToString(auth.getBytes(StandardCharsets.UTF_8));
+
+        logger.debug("Enviando requisição para a URL: {}", url);
 
         try (CloseableHttpClient client = HttpClients.custom()
                 .setDefaultRequestConfig(config)
                 .build()) {
 
             HttpGet request = new HttpGet(url);
-            request.setHeader("Authorization", "Basic " + encodedAuth);  // Configuração para autenticação Basic
+            request.setHeader("Authorization", "Basic " + encodedAuth);  // Configura autenticação Basic
 
-            // Envia a requisição e trata a resposta
+            logger.debug("Requisição executada com o header Authorization: Basic *****");
+
             try (CloseableHttpResponse response = client.execute(request)) {
                 int statusCode = response.getCode();
+                logger.debug("Recebido status code: {}", statusCode);
 
                 if (statusCode == HttpStatus.SC_OK) {
-                    // Lógica de sucesso com base na resposta da API (ex: analisar corpo JSON)
-                    // Aqui você pode adicionar lógica específica para verificar a resposta da API.
+                    logger.info("Usuário {} autenticado com sucesso na API externa.", username);
                     return true;
                 } else if (statusCode == HttpStatus.SC_BAD_REQUEST || statusCode == HttpStatus.SC_NOT_FOUND) {
+                    logger.warn("Erro de autenticação na API externa para o usuário {}. Status code: {}", username, statusCode);
                     return false;  // Erros como 400 ou 404 retornam false
                 }
             }
         } catch (IOException e) {
-            // Timeout ou erro de conexão
+            logger.error("Erro ao chamar a API externa para o usuário {}. Mensagem: {}", username, e.getMessage());
             return false;
         }
 
@@ -78,7 +151,6 @@ public class CustomAuthProvider implements Authenticator {
 
     @Override
     public void action(AuthenticationFlowContext context) {
-        // Nenhuma ação necessária
     }
 
     @Override
@@ -93,11 +165,9 @@ public class CustomAuthProvider implements Authenticator {
 
     @Override
     public void setRequiredActions(KeycloakSession session, RealmModel realm, UserModel user) {
-        // Nenhuma ação adicional necessária
     }
 
     @Override
     public void close() {
-        // Cleanup se necessário
     }
 }
