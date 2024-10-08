@@ -34,17 +34,18 @@ public class CustomAuthProvider implements Authenticator {
     }
 
     private boolean callExternalAPI(String username) {
-        String url = "https://api.example.com/user/" + username; // Ajuste conforme necessário
+        // URL de acordo com o OpenAPI atualizado
+        String url = "https://api.pge-rj.gov.br/v1/authenticateUser?username=" + username;
 
         // Configuração de timeout
         RequestConfig config = RequestConfig.custom()
-                .setConnectTimeout(Timeout.ofSeconds(5)) // Timeout de conexão
+                .setConnectTimeout(Timeout.ofSeconds(5))  // Timeout de conexão
                 .setResponseTimeout(Timeout.ofSeconds(5)) // Timeout de resposta
                 .build();
 
         // Credenciais para autenticação Basic
-        String apiUsername = "username";  // Substitua com seu username
-        String apiPassword = "password";     // Substitua com sua senha
+        String apiUsername = "username";  // Substitua com o username correto
+        String apiPassword = "password";  // Substitua com a senha correta
         String auth = apiUsername + ":" + apiPassword;
         String encodedAuth = Base64.getEncoder().encodeToString(auth.getBytes(StandardCharsets.UTF_8));
 
@@ -53,13 +54,15 @@ public class CustomAuthProvider implements Authenticator {
                 .build()) {
 
             HttpGet request = new HttpGet(url);
-            request.setHeader("Authorization", "Basic " + encodedAuth);  // Configura autenticação Basic
+            request.setHeader("Authorization", "Basic " + encodedAuth);  // Configuração para autenticação Basic
 
+            // Envia a requisição e trata a resposta
             try (CloseableHttpResponse response = client.execute(request)) {
                 int statusCode = response.getCode();
 
                 if (statusCode == HttpStatus.SC_OK) {
-                    // Lógica de sucesso com base na resposta da API
+                    // Lógica de sucesso com base na resposta da API (ex: analisar corpo JSON)
+                    // Aqui você pode adicionar lógica específica para verificar a resposta da API.
                     return true;
                 } else if (statusCode == HttpStatus.SC_BAD_REQUEST || statusCode == HttpStatus.SC_NOT_FOUND) {
                     return false;  // Erros como 400 ou 404 retornam false
