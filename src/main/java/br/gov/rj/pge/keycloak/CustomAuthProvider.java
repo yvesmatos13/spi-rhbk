@@ -14,6 +14,8 @@ import org.apache.hc.client5.http.impl.classic.HttpClients;
 import org.apache.hc.core5.http.HttpStatus;
 import org.apache.hc.core5.util.Timeout;
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.util.Base64;
 
 public class CustomAuthProvider implements Authenticator {
 
@@ -32,29 +34,35 @@ public class CustomAuthProvider implements Authenticator {
     }
 
     private boolean callExternalAPI(String username) {
-        String url = "https://api.example.com/user/" + username; // URL a ser ajustada conforme o OpenAPI
+        String url = "https://api.example.com/user/" + username; // Ajuste conforme necessário
 
-        // Configurando o timeout
+        // Configuração de timeout
         RequestConfig config = RequestConfig.custom()
-                .setConnectTimeout(Timeout.ofSeconds(10)) // Timeout de conexão
-                .setResponseTimeout(Timeout.ofSeconds(10)) // Timeout de resposta
+                .setConnectTimeout(Timeout.ofSeconds(5)) // Timeout de conexão
+                .setResponseTimeout(Timeout.ofSeconds(5)) // Timeout de resposta
                 .build();
 
+        // Credenciais para autenticação Basic
+        String apiUsername = "username";  // Substitua com seu username
+        String apiPassword = "password";     // Substitua com sua senha
+        String auth = apiUsername + ":" + apiPassword;
+        String encodedAuth = Base64.getEncoder().encodeToString(auth.getBytes(StandardCharsets.UTF_8));
+
         try (CloseableHttpClient client = HttpClients.custom()
-                .setDefaultRequestConfig(config) // Define o config no cliente
+                .setDefaultRequestConfig(config)
                 .build()) {
 
             HttpGet request = new HttpGet(url);
-            request.setHeader("Authorization", "Bearer <your-api-key>"); // Configurar com sua chave ou autenticação
+            request.setHeader("Authorization", "Basic " + encodedAuth);  // Configura autenticação Basic
 
             try (CloseableHttpResponse response = client.execute(request)) {
                 int statusCode = response.getCode();
 
                 if (statusCode == HttpStatus.SC_OK) {
-                    // Lógica de sucesso, baseada na resposta da API
+                    // Lógica de sucesso com base na resposta da API
                     return true;
                 } else if (statusCode == HttpStatus.SC_BAD_REQUEST || statusCode == HttpStatus.SC_NOT_FOUND) {
-                    return false;  // Erros tratados como false
+                    return false;  // Erros como 400 ou 404 retornam false
                 }
             }
         } catch (IOException e) {
@@ -87,6 +95,6 @@ public class CustomAuthProvider implements Authenticator {
 
     @Override
     public void close() {
-        // Cleanup if necessary
+        // Cleanup se necessário
     }
 }
